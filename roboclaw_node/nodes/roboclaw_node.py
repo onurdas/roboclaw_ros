@@ -6,7 +6,7 @@ import diagnostic_updater
 import roboclaw_driver.roboclaw_driver as roboclaw
 import rospy
 import tf
-from geometry_msgs.msg import Quaternion, Twist
+from geometry_msgs.msg import Quaternion, Twist, PointStamped,Point
 from nav_msgs.msg import Odometry
 
 __author__ = "bwbazemore@uga.edu (Brad Bazemore)"
@@ -19,6 +19,7 @@ class EncoderOdom:
         self.TICKS_PER_METER = ticks_per_meter
         self.BASE_WIDTH = base_width
         self.odom_pub = rospy.Publisher('/odom', Odometry, queue_size=10)
+        self.enc_pub = rospy.Publisher('/enc', PointStamped, queue_size=10)
         self.cur_x = 0
         self.cur_y = 0
         self.cur_theta = 0.0
@@ -79,6 +80,7 @@ class EncoderOdom:
         else:
             vel_x, vel_theta = self.update(enc_left, enc_right)
             self.publish_odom(self.cur_x, self.cur_y, self.cur_theta, vel_x, vel_theta)
+            self.publish_enc(enc_left, enc_right)
 
     def publish_odom(self, cur_x, cur_y, cur_theta, vx, vth):
         quat = tf.transformations.quaternion_from_euler(0, 0, cur_theta)
@@ -115,6 +117,19 @@ class EncoderOdom:
 
         self.odom_pub.publish(odom)
 
+    def publish_enc(self,enc_left, enc_right):
+        
+        current_time = rospy.Time.now()
+
+        enc = PointStamped()
+        enc.header.stamp = current_time
+        #enc.header.frame_id = 'enc'
+
+        enc.point.x = enc_left
+        enc.point.y = enc_right
+        
+
+        self.enc_pub.publish(enc)
 
 class Node:
     def __init__(self):
@@ -184,6 +199,7 @@ class Node:
         self.last_set_speed_time = rospy.get_rostime()
 
         rospy.Subscriber("cmd_vel", Twist, self.cmd_vel_callback)
+        rospy.Subscriber("cmd_pwm", Point, self.cmd_pwm_callback)
 
         rospy.sleep(1)
 
@@ -229,12 +245,41 @@ class Node:
                 rospy.logdebug(e)
 
             if ('enc1' in vars()) and ('enc2' in vars()):
-                rospy.logdebug(" Encoders %d %d" % (enc1, enc2))
-                self.encodm.update_publish(enc1, enc2)
-
+                #rospy.logdebug(" Encoders %d %d" % (enc1, enc2))
+                if (status1 and status2 ):
+                    self.encodm.update_publish(enc1, enc2)
                 self.updater.update()
             r_time.sleep()
 
+    def cmd_pwm_callback(self, point):
+        self.last_set_speed_time = rospy.get_rostime()
+
+        motor1 = int(point.x)
+        motor2 = int(point.y)     
+
+       # rospy.logdebug("motor1:%d motor2: %d", motor1, motor2)
+
+        try:
+            # This is a hack way to keep a poorly tuned PID from making noise at speed 0
+            if motor1 is 0 and motor2 is 0:
+                roboclaw.ForwardM1(self.address, 0)
+                roboclaw.ForwardM2(self.address, 0)
+            else:
+                if (motor1 >= 0):
+                    roboclaw.ForwardM1(self.address, motor1)
+                else:
+                    roboclaw.BackwardM1(self.address, -motor1)
+                if (motor2 >= 0):
+                    roboclaw.ForwardM2(self.address, motor2)
+                else:
+                    roboclaw.BackwardM2(self.address, -motor2)
+                
+                
+        except OSError as e:
+            rospy.logwarn("Motor OSError: %d", e.errno)
+            rospy.logdebug(e)
+
+    # TODO: Need to make this work when more than one error is raised
     def cmd_vel_callback(self, twist):
         self.last_set_speed_time = rospy.get_rostime()
 

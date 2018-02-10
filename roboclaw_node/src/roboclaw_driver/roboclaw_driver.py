@@ -276,12 +276,12 @@ def _read4_1(address, cmd):
                 crc = _readchecksumword()
                 if crc[0]:
                     if _crc & 0xFFFF != crc[1] & 0xFFFF:
-                        return 0, 0
+                        return 0, 0, 0
                     return 1, val1[1], val2[1]
         trys -= 1
         if trys == 0:
             break
-    return 0, 0
+    return 0, 0, 0
 
 
 def _read_n(address, cmd, args):
